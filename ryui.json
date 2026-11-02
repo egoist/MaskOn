@@ -1,7 +1,7 @@
 {
-  "name": "Maskon",
+  "name": "MaskOn",
   "id": "dev.egoist.maskon",
-  "version": "1.0",
+  "version": "0.1",
   "build": 1,
   "icon": "icon.png",
   "accent": "#65D36E",
