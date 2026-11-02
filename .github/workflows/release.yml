@@ -1,0 +1,84 @@
+# Pushing a tag like v0.1 builds the apps and publishes a GitHub release with
+# them. The release stays a draft until both builds are attached. See the
+# README's Release section for the secrets this needs.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write # to create the release and attach the builds
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: the tag matches ryui.json's version
+        run: |
+          VERSION=$(jq -r .version ryui.json)
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match ryui.json's version $VERSION (expected v$VERSION)"
+            exit 1
+          fi
+      - name: a draft release, unless a re-run already made one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+
+  android:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+        with: { packages: platform-tools } # its default asks for "tools", which the SDK no longer has
+      - name: an NDK
+        run: ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null || sdkmanager "ndk;27.1.12297006"
+      - name: the signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::the ANDROID_KEYSTORE secret isn't set; see the README's Release section"
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+      - run: go tool ryui build -android
+        env:
+          RYUI_KEYSTORE: ${{ runner.temp }}/upload.jks
+          RYUI_KEY_ALIAS: upload
+          RYUI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/MaskOn.apk --clobber
+
+  # A build for the iOS simulator: one for devices needs an Apple Developer
+  # certificate and provisioning profiles.
+  ios:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: go test ./...
+      - run: go tool ryui build -ios -simulator
+      - run: ditto -c -k --keepParent dist/MaskOn.app dist/MaskOn-iOS-Simulator.zip
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/MaskOn-iOS-Simulator.zip --clobber
+
+  publish:
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

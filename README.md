@@ -30,6 +30,31 @@ go get github.com/egoist/ryui@main
 `ryui dev` without `-once` runs the Go code on your Mac and reloads on save,
 but on Android the photos' files are on the device: use `-once` there.
 
+## Release
+
+Pushing a tag builds the apps and publishes a GitHub release with them. Nothing
+goes to the stores.
+
+First, once, make the Android signing key. Keep it safe, outside the repo:
+Android only installs an update signed with the same key.
+
+```sh
+keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
+base64 -i upload.jks | gh secret set ANDROID_KEYSTORE
+gh secret set ANDROID_KEYSTORE_PASSWORD
+```
+
+Then for each release, raise `version` and `build` in `ryui.json`, commit, and
+tag it with the same version:
+
+```sh
+git tag v0.1 && git push origin v0.1
+```
+
+The release has `MaskOn.apk`, and `MaskOn-iOS-Simulator.zip`, a build for the
+iOS simulator. One for iPhones needs an Apple Developer certificate and
+provisioning profiles.
+
 ## Layout
 
 - `detect`: what's private in a line of text.
