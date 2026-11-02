@@ -1,29 +1,56 @@
-# Pushing a tag like v0.1 builds the apps and publishes a GitHub release with
-# them. The release stays a draft until both builds are attached. See the
-# README's Release section for the secrets this needs.
+# Pushing a tag like v0.1, or running this by hand on main, builds the apps and
+# publishes a GitHub release with them, for the version in ryui.json. The
+# release stays a draft until both builds are attached. See the README's
+# Release section for the secrets this needs.
 name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 permissions:
-  contents: write # to create the release and attach the builds
+  contents: write # to tag, create the release and attach the builds
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - name: the tag matches ryui.json's version
+      - name: the tag, from ryui.json's version
+        id: tag
         run: |
-          VERSION=$(jq -r .version ryui.json)
-          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME doesn't match ryui.json's version $VERSION (expected v$VERSION)"
+          TAG="v$(jq -r .version ryui.json)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match ryui.json's version (expected $TAG)"
             exit 1
           fi
+          if [ "$GITHUB_REF_TYPE" = branch ] && [ "$GITHUB_REF_NAME" != main ]; then
+            echo "::error::releases come from main, not $GITHUB_REF_NAME"
+            exit 1
+          fi
+          EXISTING=$(git ls-remote origin "refs/tags/$TAG" | cut -f1)
+          if [ -z "$EXISTING" ]; then
+            git tag "$TAG"
+            git push origin "$TAG" # with this job's token, so it doesn't start another run
+          elif [ "$EXISTING" != "$GITHUB_SHA" ]; then
+            echo "::error::$TAG is already on another commit; raise version in ryui.json"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: a draft release, unless a re-run already made one
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null || true)
+          if [ "$DRAFT" = false ]; then
+            echo "::error::$TAG is already released; raise version in ryui.json"
+            exit 1
+          fi
+          if [ -z "$DRAFT" ]; then
+            gh release create "$TAG" --draft --generate-notes --verify-tag
+          fi
 
   android:
     needs: release
@@ -55,7 +82,8 @@ jobs:
       - name: attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/MaskOn.apk --clobber
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/MaskOn.apk --clobber
 
   # A build for the iOS simulator: one for devices needs an Apple Developer
   # certificate and provisioning profiles.
@@ -72,13 +100,15 @@ jobs:
       - name: attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/MaskOn-iOS-Simulator.zip --clobber
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/MaskOn-iOS-Simulator.zip --clobber
 
   publish:
-    needs: [android, ios]
+    needs: [release, android, ios]
     runs-on: ubuntu-latest
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false

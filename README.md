@@ -32,8 +32,8 @@ but on Android the photos' files are on the device: use `-once` there.
 
 ## Release
 
-Pushing a tag builds the apps and publishes a GitHub release with them. Nothing
-goes to the stores.
+The `release` workflow builds the apps and publishes a GitHub release with them.
+Nothing goes to the stores.
 
 First, once, make the Android signing key. Keep it safe, outside the repo:
 Android only installs an update signed with the same key.
@@ -45,9 +45,11 @@ gh secret set ANDROID_KEYSTORE_PASSWORD
 ```
 
 Then for each release, raise `version` and `build` in `ryui.json`, commit, and
-tag it with the same version:
+either run the workflow on `main`, which makes the tag from `version`, or push
+the tag yourself:
 
 ```sh
+gh workflow run release     # or Run workflow on GitHub's Actions tab
 git tag v0.1 && git push origin v0.1
 ```
 
