@@ -32,30 +32,32 @@ but on Android the photos' files are on the device: use `-once` there.
 
 ## Release
 
-The `release` workflow builds the apps and publishes a GitHub release with them.
-Nothing goes to the stores.
+The `release` workflow builds the apps, uploads the iOS build to TestFlight, and
+publishes a GitHub release with `MaskOn.apk` and `MaskOn.ipa`. The `.ipa` is
+signed for the App Store, so iPhones install it through TestFlight.
 
-First, once, make the Android signing key. Keep it safe, outside the repo:
-Android only installs an update signed with the same key.
-
-```sh
-keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
-base64 -i upload.jks | gh secret set ANDROID_KEYSTORE
-gh secret set ANDROID_KEYSTORE_PASSWORD
-```
-
-Then for each release, raise `version` and `build` in `ryui.json`, commit, and
-either run the workflow on `main`, which makes the tag from `version`, or push
-the tag yourself:
+For each release, raise `version` and `build` in `ryui.json`, commit, and either
+run the workflow on `main`, which makes the tag from `version`, or push the tag
+yourself:
 
 ```sh
 gh workflow run release     # or Run workflow on GitHub's Actions tab
 git tag v0.1 && git push origin v0.1
 ```
 
-The release has `MaskOn.apk`, and `MaskOn-iOS-Simulator.zip`, a build for the
-iOS simulator. One for iPhones needs an Apple Developer certificate and
-provisioning profiles.
+It needs these secrets, the files in base64:
+
+- `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`: the Android signing key, with
+  the alias `upload`. Keep it safe, outside the repo: Android only installs an
+  update signed with the same key.
+- `IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD`: an Apple Distribution
+  certificate, as a `.p12`.
+- `IOS_PROFILE`, `IOS_SHARE_PROFILE`: App Store provisioning profiles for
+  `dev.egoist.maskon` and `dev.egoist.maskon.share`, both with the App Group
+  `group.dev.egoist.maskon`.
+- `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY`: an App Store Connect API key.
+
+The certificate expires on 2027-11-02. A new certificate needs new profiles too.
 
 ## Layout
 
@@ -67,9 +69,6 @@ provisioning profiles.
 
 ## Before shipping
 
-- Set `id` in `ryui.json`, and `ios.team` and the Android keystore
-  (`ryui build`, see RyUI's docs/shipping.md).
-- Sharing into the app needs an App Group on device builds.
 - Google Play asks an app reading the photo library to justify it in the
   Play Console. The `+` button's picker works without that permission.
 - A mosaic can't be read back at the block size used here, but only a solid

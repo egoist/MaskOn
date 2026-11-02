@@ -1,13 +1,14 @@
 {
   "name": "MaskOn",
   "id": "dev.egoist.maskon",
-  "version": "0.1",
-  "build": 1,
+  "version": "0.2",
+  "build": 2,
   "icon": "icon.png",
   "accent": "#65D36E",
   "orientations": ["portrait"],
   "shareTarget": { "types": ["image/*"], "max": 1 },
   "ios": {
+    "team": "GJE9R5VE87",
     "usage": {
       "NSPhotoLibraryUsageDescription": "Maskon shows your screenshots and photos so you can mask what's private in them. Nothing leaves your device.",
       "NSPhotoLibraryAddUsageDescription": "Maskon saves the masked copy to your photos."

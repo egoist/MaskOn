@@ -1,7 +1,7 @@
-# Pushing a tag like v0.1, or running this by hand on main, builds the apps and
-# publishes a GitHub release with them, for the version in ryui.json. The
-# release stays a draft until both builds are attached. See the README's
-# Release section for the secrets this needs.
+# Pushing a tag like v0.1, or running this by hand on main, builds the apps for
+# the version in ryui.json, uploads the iOS build to TestFlight, and publishes a
+# GitHub release with both builds. The release stays a draft until all of that
+# has worked. See the README's Release section for the secrets this needs.
 name: release
 on:
   push:
@@ -85,8 +85,6 @@ jobs:
           TAG: ${{ needs.release.outputs.tag }}
         run: gh release upload "$TAG" dist/MaskOn.apk --clobber
 
-  # A build for the iOS simulator: one for devices needs an Apple Developer
-  # certificate and provisioning profiles.
   ios:
     needs: release
     runs-on: macos-latest
@@ -95,13 +93,41 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - run: go test ./...
-      - run: go tool ryui build -ios -simulator
-      - run: ditto -c -k --keepParent dist/MaskOn.app dist/MaskOn-iOS-Simulator.zip
+      - name: the distribution certificate and the profiles
+        env:
+          CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROFILE }}
+          SHARE_PROFILE: ${{ secrets.IOS_SHARE_PROFILE }}
+        run: |
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          PW=$(openssl rand -hex 16)
+          security create-keychain -p "$PW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$PW" "$KC"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KC" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$PW" "$KC"
+          security list-keychains -d user -s "$KC" "$HOME/Library/Keychains/login.keychain-db"
+          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$PROFILES"
+          echo "$PROFILE" | base64 --decode > "$PROFILES/maskon.mobileprovision"
+          echo "$SHARE_PROFILE" | base64 --decode > "$PROFILES/maskon-share.mobileprovision"
+      - run: go tool ryui build -ios
       - name: attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release.outputs.tag }}
-        run: gh release upload "$TAG" dist/MaskOn-iOS-Simulator.zip --clobber
+        run: gh release upload "$TAG" dist/MaskOn.ipa --clobber
+      - name: upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY" > ~/.appstoreconnect/private_keys/AuthKey_"$ASC_KEY_ID".p8
+          xcrun altool --upload-app -f dist/MaskOn.ipa -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
   publish:
     needs: [release, android, ios]
